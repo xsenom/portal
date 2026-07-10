@@ -1,0 +1,64 @@
+# Старый .NET backend не публикуется
+backend/
+
+# Секреты
+.secrets/
+**/.secrets/
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+
+# PHP runtime
+php-backend/storage/*
+!php-backend/storage/.gitkeep
+!php-backend/storage/sessions/
+php-backend/storage/sessions/*
+!php-backend/storage/sessions/.gitkeep
+*.log
+*.pid
+sess_*
+
+# Frontend runtime
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/coverage/
+frontend/.turbo/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# Резервные и временные файлы
+*.bak
+*.bak_*
+*.backup
+*.backup-*
+*.old
+*.orig
+*.tmp
+*~
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+.cache/
+__pycache__/
+*.pyc
+
+# IDE и ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Локальные резервные копии
+backups/
