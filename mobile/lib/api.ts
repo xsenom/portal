@@ -1,39 +1,187 @@
-import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://test.xsenom.ru/api/portal";
-const TOKEN_KEY = "portal.auth.token";
+const API_BASE =
+  Platform.OS === "web"
+    ? "/api/portal"
+    : "https://test.xsenom.ru/api/portal";
 
-export async function getToken(): Promise<string | null> {
-  if (Platform.OS === "web") return null;
-  return SecureStore.getItemAsync(TOKEN_KEY);
-}
-
-export async function saveToken(token: string | null): Promise<void> {
-  if (Platform.OS === "web") return;
-  if (token) await SecureStore.setItemAsync(TOKEN_KEY, token);
-  else await SecureStore.deleteItemAsync(TOKEN_KEY);
-}
+const DEFAULT_REQUEST_TIMEOUT = 12000;
+const UPLOAD_REQUEST_TIMEOUT = 120000;
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  readonly status: number;
+  readonly data: unknown;
+
+  constructor(
+    message: string,
+    status: number,
+    data: unknown = null,
+  ) {
     super(message);
+
+    this.name = "ApiError";
+    this.status = status;
+    this.data = data;
   }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = await getToken();
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+export type ApiRequestInit =
+  RequestInit & {
+    timeoutMs?: number;
+  };
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+function statusMessage(status: number): string {
+  if (status === 400) {
+    return "Некорректные данные запроса";
+  }
 
-  const data = await response.json().catch(() => null);
-  if (!response.ok) throw new ApiError(response.status, data?.message || "Ошибка запроса");
+  if (status === 401) {
+    return "Требуется авторизация";
+  }
+
+  if (status === 403) {
+    return "Недостаточно прав";
+  }
+
+  if (status === 404) {
+    return "Данные не найдены";
+  }
+
+  if (status === 408) {
+    return "Сервер слишком долго не отвечает";
+  }
+
+  if (status === 409) {
+    return "Данные уже были изменены";
+  }
+
+  if (status === 413) {
+    return "Файл слишком большой";
+  }
+
+  if (status >= 500) {
+    return "Внутренняя ошибка сервера";
+  }
+
+  return "Не удалось выполнить запрос";
+}
+
+function normalizePath(path: string): string {
+  return path.startsWith("/")
+    ? path
+    : `/${path}`;
+}
+
+function isFormDataBody(
+  body: BodyInit | null | undefined,
+): boolean {
+  return (
+    typeof FormData !== "undefined" &&
+    body instanceof FormData
+  );
+}
+
+export async function api<T = unknown>(
+  path: string,
+  init: ApiRequestInit = {},
+): Promise<T> {
+  const {
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT,
+    ...fetchInit
+  } = init;
+
+  const controller = new AbortController();
+
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  const headers = new Headers(fetchInit.headers);
+
+  headers.set("Accept", "application/json");
+
+  if (
+    fetchInit.body !== undefined &&
+    fetchInit.body !== null &&
+    !isFormDataBody(fetchInit.body) &&
+    !headers.has("Content-Type")
+  ) {
+    headers.set(
+      "Content-Type",
+      "application/json",
+    );
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${API_BASE}${normalizePath(path)}`,
+      {
+        ...fetchInit,
+        headers,
+        credentials: "include",
+        signal: controller.signal,
+      },
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.name === "AbortError"
+    ) {
+      throw new ApiError(
+        "Сервер слишком долго не отвечает",
+        408,
+      );
+    }
+
+    throw new ApiError(
+      "Сервер временно недоступен",
+      0,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const responseText = await response.text();
+
+  let data: unknown = null;
+
+  if (responseText.trim()) {
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      data = responseText;
+    }
+  }
+
+  if (!response.ok) {
+    const serverMessage =
+      typeof data === "object" &&
+      data !== null &&
+      "message" in data &&
+      typeof data.message === "string"
+        ? data.message.trim()
+        : "";
+
+    throw new ApiError(
+      serverMessage ||
+        statusMessage(response.status),
+      response.status,
+      data,
+    );
+  }
+
   return data as T;
+}
+
+export async function apiUpload<T = unknown>(
+  path: string,
+  formData: FormData,
+): Promise<T> {
+  return api<T>(path, {
+    method: "POST",
+    body: formData,
+    timeoutMs: UPLOAD_REQUEST_TIMEOUT,
+  });
 }

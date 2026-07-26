@@ -12,5 +12,7 @@ require_once __DIR__ . '/Controllers/UserController.php';
 require_once __DIR__ . '/Controllers/TaskController.php';
 require_once __DIR__ . '/Controllers/IndicatorController.php';
 require_once __DIR__ . '/Controllers/WorkTimeController.php';
+require_once __DIR__ . '/Controllers/PortalOperationsController.php';
+require_once __DIR__ . '/Controllers/SupportController.php';
 require_once __DIR__ . '/Bootstrap.php';
 require_once __DIR__ . '/App.php';

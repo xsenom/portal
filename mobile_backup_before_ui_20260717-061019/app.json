@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Portal",
+    "slug": "portal",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "portal",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "baseUrl": "/mobile"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ru.xsenom.portal"
+    },
+    "android": {
+      "package": "ru.xsenom.portal"
+    },
+    "extra": {
+      "apiUrl": "https://test.xsenom.ru/api/portal"
+    }
+  }
+}

@@ -7,11 +7,44 @@
     "scheme": "portal",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "plugins": ["expo-router", "expo-secure-store"],
-    "experiments": {"typedRoutes": true},
-    "web": {"bundler": "metro", "output": "static"},
-    "ios": {"supportsTablet": true, "bundleIdentifier": "ru.xsenom.portal"},
-    "android": {"package": "ru.xsenom.portal"},
-    "extra": {"apiUrl": "https://test.xsenom.ru/api/portal"}
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Разрешите доступ к фотографиям для изменения фотографии профиля.",
+          "cameraPermission": "Разрешите доступ к камере для создания фотографии профиля."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Разрешите приложению сканировать штрих-коды"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ru.xsenom.portal"
+    },
+    "android": {
+      "package": "ru.xsenom.portal"
+    },
+    "extra": {
+      "apiUrl": "https://test.xsenom.ru/api/portal"
+    },
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    }
   }
 }
