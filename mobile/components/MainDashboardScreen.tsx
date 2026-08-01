@@ -469,8 +469,7 @@ export default function MainDashboardScreen() {
           style={styles.profileButton}
           onPress={() => {
             router.push(
-              "/(tabs)/profile"
-                as unknown as Href,
+              "/(tabs)/profile" as unknown as Href,
             );
           }}
         >
@@ -632,8 +631,7 @@ export default function MainDashboardScreen() {
             style={styles.quickCard}
             onPress={() => {
               router.push(
-                "/(tabs)/tasks"
-                  as unknown as Href,
+                "/(tabs)/tasks" as unknown as Href,
               );
             }}
           >
@@ -654,8 +652,7 @@ export default function MainDashboardScreen() {
             style={styles.quickCard}
             onPress={() => {
               router.push(
-                "/archive"
-                  as unknown as Href,
+                "/archive" as unknown as Href,
               );
             }}
           >
@@ -687,8 +684,7 @@ export default function MainDashboardScreen() {
           <Pressable
             onPress={() => {
               router.push(
-                "/(tabs)/tasks"
-                  as unknown as Href,
+                "/(tabs)/tasks" as unknown as Href,
               );
             }}
           >

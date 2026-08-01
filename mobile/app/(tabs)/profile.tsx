@@ -314,8 +314,7 @@ export default function ProfileScreen() {
           style={styles.closedButton}
           onPress={() => {
             router.push(
-              "/my-closed-requests"
-                as unknown as Href,
+              "/my-closed-requests" as unknown as Href,
             );
           }}
         >
@@ -462,8 +461,7 @@ export default function ProfileScreen() {
             style={styles.adminButton}
             onPress={() => {
               router.push(
-                "/admin"
-                  as unknown as Href,
+                "/admin" as unknown as Href,
               );
             }}
           >
@@ -492,8 +490,7 @@ export default function ProfileScreen() {
           style={styles.linkRow}
           onPress={() => {
             router.push(
-              "/data-processing"
-                as unknown as Href,
+              "/data-processing" as unknown as Href,
             );
           }}
         >
