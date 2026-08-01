@@ -1,15 +1,23 @@
-import { Linking as NativeLinking } from "react-native";
-import { router as nativeRouter } from "expo-router";
-import { AppShell } from "@/components/AppShell";
-import { ApiError } from "@/lib/api";
+import {
+  ApiError,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { colors } from "@/lib/theme";
-import { router } from "expo-router";
-import { useState } from "react";
 import {
+  type Href,
+  Redirect,
+  router,
+} from "expo-router";
+import {
+  useState,
+} from "react";
+import {
+  ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,414 +26,397 @@ import {
 } from "react-native";
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const {
+    user,
+    loading,
+    login,
+  } = useAuth();
 
   const [loginValue, setLoginValue] =
     useState("");
+
   const [password, setPassword] =
     useState("");
 
   const [passwordVisible, setPasswordVisible] =
     useState(false);
 
-  const [submitted, setSubmitted] =
+  const [submitting, setSubmitting] =
     useState(false);
-  const [busy, setBusy] =
-    useState(false);
-  const [serverError, setServerError] =
+
+  const [error, setError] =
     useState("");
 
-  const loginError =
-    submitted && loginValue.trim().length < 3
-      ? "Введите корректный логин"
-      : "";
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.page}>
+        <View style={styles.center}>
+          <ActivityIndicator
+            size="large"
+            color={colors.primary}
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
-  const passwordError =
-    submitted && password.length < 6
-      ? "Пароль должен содержать не менее 6 символов"
-      : "";
-
-  const valid =
-    loginValue.trim().length >= 3 &&
-    password.length >= 6;
+  if (user) {
+    return (
+      <Redirect href="/(tabs)/time" />
+    );
+  }
 
   async function submit() {
-    setSubmitted(true);
-    setServerError("");
+    const cleanLogin =
+      loginValue.trim();
 
-    if (!valid || busy) {
+    if (!cleanLogin) {
+      setError(
+        "Введите email, телефон или логин",
+      );
+
       return;
     }
 
-    setBusy(true);
+    if (!password) {
+      setError("Введите пароль");
+      return;
+    }
+
+    if (submitting) {
+      return;
+    }
 
     try {
+      Keyboard.dismiss();
+      setSubmitting(true);
+      setError("");
+
       await login(
-        loginValue.trim(),
+        cleanLogin,
         password,
       );
 
-      router.replace("/(tabs)/profile");
-    } catch (error) {
-      if (
-        error instanceof ApiError &&
-        error.status === 401
-      ) {
-        setServerError(
-          "Неверный логин или пароль",
-        );
-      } else if (
-        error instanceof ApiError &&
-        error.status === 403
-      ) {
-        setServerError(
-          error.message || "Аккаунт отключён",
-        );
-      } else {
-        setServerError(
-          error instanceof Error
-            ? error.message
+      router.replace(
+        "/(tabs)/time" as unknown as Href,
+      );
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof ApiError
+          ? caughtError.message
+          : caughtError instanceof Error
+            ? caughtError.message
             : "Не удалось выполнить вход",
-        );
-      }
+      );
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   }
 
   return (
-    <AppShell>
+    <SafeAreaView style={styles.page}>
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={styles.page}
         behavior={
           Platform.OS === "ios"
             ? "padding"
             : undefined
         }
       >
-        <ScrollView
-          style={styles.flex}
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
+        <Pressable
+          style={styles.page}
+          onPress={Keyboard.dismiss}
         >
-          <Text style={styles.title}>
-            Авторизация
-          </Text>
+          <ScrollView
+            contentContainerStyle={
+              styles.content
+            }
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+          >
+            <View style={styles.brand}>
+              <View style={styles.logo}>
+                <Text style={styles.logoText}>
+                  VS
+                </Text>
+              </View>
 
-          <View style={styles.form}>
-            <Field
-              label="Логин"
-              value={loginValue}
-              error={loginError}
-              autoCapitalize="none"
-              autoCorrect={false}
-              onChangeText={(value) => {
-                setLoginValue(value);
-                setServerError("");
-              }}
-            />
+              <Text style={styles.title}>
+                VolgaShield
+              </Text>
 
-            <Field
-              label="Пароль"
-              value={password}
-              error={passwordError}
-              secureTextEntry={!passwordVisible}
-              onChangeText={(value) => {
-                setPassword(value);
-                setServerError("");
-              }}
-              trailing={
+              <Text style={styles.subtitle}>
+                Техническое обслуживание
+              </Text>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                Вход в приложение
+              </Text>
+
+              <Text style={styles.label}>
+                Логин
+              </Text>
+
+              <TextInput
+                style={styles.input}
+                value={loginValue}
+                onChangeText={setLoginValue}
+                placeholder="Email, телефон или логин"
+                placeholderTextColor="#98a39e"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                returnKeyType="next"
+                textContentType="username"
+              />
+
+              <Text style={styles.label}>
+                Пароль
+              </Text>
+
+              <View style={styles.passwordWrap}>
+                <TextInput
+                  style={styles.passwordInput}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Введите пароль"
+                  placeholderTextColor="#98a39e"
+                  secureTextEntry={
+                    !passwordVisible
+                  }
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  textContentType="password"
+                  onSubmitEditing={() =>
+                    void submit()
+                  }
+                />
+
                 <Pressable
-                  style={styles.eyeButton}
+                  style={styles.passwordButton}
+                  hitSlop={8}
                   onPress={() =>
                     setPasswordVisible(
-                      (current) => !current,
+                      (value) => !value,
                     )
                   }
                 >
-                  <Text style={styles.eyeText}>
-                    {passwordVisible ? "●" : "◉"}
+                  <Text
+                    style={
+                      styles.passwordButtonText
+                    }
+                  >
+                    {passwordVisible
+                      ? "Скрыть"
+                      : "Показать"}
                   </Text>
                 </Pressable>
-              }
-            />
-
-            <Pressable>
-              <Text style={styles.forgot}>
-                Забыли пароль?
-              </Text>
-            </Pressable>
-
-            {!!serverError && (
-              <View style={styles.serverError}>
-                <Text
-                  style={styles.serverErrorText}
-                >
-                  {serverError}
-                </Text>
               </View>
-            )}
 
-            <Pressable
-              style={[
-                styles.primaryButton,
-                (!valid || busy) &&
-                  styles.primaryButtonDisabled,
-              ]}
-              disabled={!valid || busy}
-              onPress={() => void submit()}
-            >
-              <Text style={styles.primaryButtonText}>
-                {busy ? "Входим…" : "Войти"}
-              </Text>
-            </Pressable>
+              {!!error && (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>
+                    {error}
+                  </Text>
+                </View>
+              )}
 
-            <Text style={styles.switchText}>
-              Нет аккаунта?{" "}
-              <Text style={styles.linkText}
-                onPress={() => nativeRouter.push("/register")}
->
-                Зарегистрироваться
-              </Text>
+              <Pressable
+                style={[
+                  styles.loginButton,
+                  submitting &&
+                    styles.disabled,
+                ]}
+                disabled={submitting}
+                onPress={() => void submit()}
+              >
+                {submitting ? (
+                  <ActivityIndicator
+                    color={colors.white}
+                  />
+                ) : (
+                  <Text
+                    style={
+                      styles.loginButtonText
+                    }
+                  >
+                    Войти
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+
+            <Text style={styles.authNote}>
+              Сейчас используется авторизация
+              сервера приложения. Подключение
+              Bitrix24 будет выполнено отдельным
+              провайдером без изменения этого
+              экрана.
             </Text>
-
-            <Text style={styles.legal}>
-              Нажимая кнопку «Войти», вы принимаете{" "}
-              <Text style={styles.legalLink}
-                onPress={() => void NativeLinking.openURL('https://test.xsenom.ru/terms')}
->
-                условия обработки персональных данных
-              </Text>{" "}
-              и даёте согласие на использование
-              мессенджера.
-            </Text>
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </Pressable>
       </KeyboardAvoidingView>
-    </AppShell>
-  );
-}
-
-type FieldProps = {
-  label: string;
-  value: string;
-  error?: string;
-  secureTextEntry?: boolean;
-  autoCapitalize?: "none" | "sentences" | "words" | "characters";
-  autoCorrect?: boolean;
-  trailing?: React.ReactNode;
-  onChangeText: (value: string) => void;
-};
-
-function Field({
-  label,
-  value,
-  error,
-  trailing,
-  onChangeText,
-  secureTextEntry,
-  autoCapitalize,
-  autoCorrect,
-}: FieldProps) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>
-        {label}
-      </Text>
-
-      <View
-        style={[
-          styles.inputWrap,
-          !!error && styles.inputWrapError,
-        ]}
-      >
-        <TextInput
-          style={styles.input}
-          value={value}
-          secureTextEntry={secureTextEntry}
-          autoCapitalize={autoCapitalize}
-          autoCorrect={autoCorrect}
-          onChangeText={onChangeText}
-        />
-
-        {trailing}
-      </View>
-
-      {!!error && (
-        <Text style={styles.fieldError}>
-          {error}
-        </Text>
-      )}
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: {
+  page: {
     flex: 1,
+    backgroundColor: colors.background,
+  },
+
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   content: {
     flexGrow: 1,
-    paddingTop: 48,
-    paddingHorizontal: 18,
-    paddingBottom: 28,
-    backgroundColor: colors.surface,
+    justifyContent: "center",
+    paddingHorizontal: 22,
+    paddingVertical: 32,
+  },
+
+  brand: {
+    alignItems: "center",
+    marginBottom: 26,
+  },
+
+  logo: {
+    width: 70,
+    height: 70,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+  },
+
+  logoText: {
+    color: colors.white,
+    fontSize: 24,
+    fontWeight: "900",
   },
 
   title: {
-    marginBottom: 28,
+    marginTop: 15,
     color: colors.text,
-    fontSize: 32,
-    lineHeight: 33,
-    fontWeight: "700",
-    letterSpacing: -0.8,
+    fontSize: 26,
+    fontWeight: "900",
   },
 
-  form: {
-    width: "100%",
-    gap: 15,
-  },
-
-  field: {
-    width: "100%",
-    gap: 7,
-  },
-
-  label: {
+  subtitle: {
+    marginTop: 5,
     color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 15,
+    fontSize: 13,
   },
 
-  inputWrap: {
-    width: "100%",
-    minHeight: 50,
-    flexDirection: "row",
-    alignItems: "center",
-    overflow: "hidden",
-
+  card: {
+    padding: 19,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 18,
     backgroundColor: colors.surface,
   },
 
-  inputWrapError: {
-    borderColor: colors.danger,
-    backgroundColor: colors.dangerSoft,
+  cardTitle: {
+    marginBottom: 18,
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+
+  label: {
+    marginBottom: 7,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   input: {
-    minWidth: 0,
-    minHeight: 48,
+    minHeight: 51,
+    marginBottom: 15,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    color: colors.text,
+    fontSize: 15,
+    backgroundColor: colors.background,
+  },
+
+  passwordWrap: {
+    minHeight: 51,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+  },
+
+  passwordInput: {
+    minHeight: 49,
     flex: 1,
     paddingHorizontal: 13,
     color: colors.text,
-    fontSize: 16,
-  },
-
-  eyeButton: {
-    width: 42,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  eyeText: {
-    color: colors.graphite,
-    fontSize: 18,
-  },
-
-  fieldError: {
-    color: colors.danger,
-    fontSize: 13,
-    lineHeight: 14,
-  },
-
-  forgot: {
-    alignSelf: "flex-start",
-    color: colors.primary,
     fontSize: 15,
-    lineHeight: 16,
-    fontWeight: "500",
   },
 
-  serverError: {
+  passwordButton: {
+    minHeight: 49,
+    justifyContent: "center",
     paddingHorizontal: 12,
-    paddingVertical: 10,
+  },
 
-    borderWidth: 1,
-    borderColor: "#f2c8cc",
-    borderRadius: 7,
+  passwordButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  errorBox: {
+    marginBottom: 13,
+    padding: 10,
+    borderRadius: 9,
     backgroundColor: colors.dangerSoft,
   },
 
-  serverErrorText: {
-    color: "#a52d36",
-    fontSize: 13,
-    lineHeight: 15,
+  errorText: {
+    color: colors.danger,
+    fontSize: 12,
+    lineHeight: 17,
   },
 
-  primaryButton: {
-    width: "100%",
-    minHeight: 50,
+  loginButton: {
+    minHeight: 53,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 7,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: 8,
+    borderRadius: 12,
     backgroundColor: colors.primary,
-
-    shadowColor: colors.primary,
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 3,
   },
 
-  primaryButtonDisabled: {
-    borderColor: colors.disabled,
-    backgroundColor: colors.disabled,
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-
-  primaryButtonText: {
+  loginButtonText: {
     color: colors.white,
     fontSize: 16,
-    fontWeight: "500",
+    fontWeight: "800",
   },
 
-  switchText: {
-    marginTop: 3,
+  disabled: {
+    opacity: 0.55,
+  },
+
+  authNote: {
+    marginTop: 18,
+    paddingHorizontal: 12,
     color: colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 16,
     textAlign: "center",
-  },
-
-  linkText: {
-    color: colors.primary,
-    fontWeight: "500",
-  },
-
-  legal: {
-    marginTop: -2,
-    color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 14,
-  },
-
-  legalLink: {
-    color: colors.primary,
-    textDecorationLine: "underline",
   },
 });

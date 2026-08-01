@@ -1,3 +1,3 @@
 export {
   default,
-} from "@/components/ServiceShiftScreen";
+} from "@/components/MainDashboardScreen";

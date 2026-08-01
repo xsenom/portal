@@ -1,75 +1,397 @@
+import { AppBackHeader } from "@/components/AppBackHeader";
 import {
   api,
   ApiError,
 } from "@/lib/api";
 import {
-  clampProgress,
-  servicePriorityLabels,
   serviceStatusLabels,
-  type ServiceRequestStatus,
-  type ServiceRequestSummary,
 } from "@/lib/service-requests";
 import { colors } from "@/lib/theme";
 import {
+  type Href,
   router,
   useFocusEffect,
 } from "expo-router";
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 
-type TabName =
-  | "current"
+type ListMode =
+  | "active"
   | "new"
   | "completed"
   | "archive";
 
-const currentStatuses:
-  ServiceRequestStatus[] = [
+type DateFilter =
+  | "all"
+  | "today"
+  | "7days"
+  | "30days";
+
+type SortMode =
+  | "newest"
+  | "oldest"
+  | "object";
+
+type RequestItem = {
+  id: number;
+  requestNumber?: string | null;
+  title?: string | null;
+  problemType?: string | null;
+  priority?: string | null;
+  status: string;
+  progressPercent?: number | null;
+  isRepeat?: boolean;
+  isDefect?: boolean;
+  isArchived?: boolean;
+  slaDeadline?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  objectName?: string | null;
+  objectAddress?: string | null;
+  primaryTechnicianName?: string | null;
+  technicianName?: string | null;
+  object?: {
+    name?: string | null;
+    address?: string | null;
+  } | null;
+};
+
+type ServiceRequestListScreenProps = {
+  initialMode?: ListMode;
+  showBack?: boolean;
+  title?: string;
+};
+
+const modes: Array<{
+  value: ListMode;
+  label: string;
+}> = [
+  {
+    value: "active",
+    label: "В работе",
+  },
+  {
+    value: "new",
+    label: "Новые",
+  },
+  {
+    value: "completed",
+    label: "Выполненные",
+  },
+  {
+    value: "archive",
+    label: "Архив",
+  },
+];
+
+const statuses = [
+  "all",
+  "New",
+  "Accepted",
+  "OnSite",
+  "InProgress",
+  "Waiting",
+  "PartiallyCompleted",
+  "Completed",
+  "Closed",
+  "Defect",
+  "Repeat",
+] as const;
+
+const dateFilters: Array<{
+  value: DateFilter;
+  label: string;
+}> = [
+  {
+    value: "all",
+    label: "За всё время",
+  },
+  {
+    value: "today",
+    label: "Сегодня",
+  },
+  {
+    value: "7days",
+    label: "7 дней",
+  },
+  {
+    value: "30days",
+    label: "30 дней",
+  },
+];
+
+const sortModes: Array<{
+  value: SortMode;
+  label: string;
+}> = [
+  {
+    value: "newest",
+    label: "Сначала новые",
+  },
+  {
+    value: "oldest",
+    label: "Сначала старые",
+  },
+  {
+    value: "object",
+    label: "По объекту",
+  },
+];
+
+function statusLabel(status: string) {
+  return (
+    serviceStatusLabels[
+      status as keyof typeof serviceStatusLabels
+    ]
+    ?? status
+  );
+}
+
+function objectAddress(
+  request: RequestItem,
+) {
+  return (
+    request.objectAddress
+    ?? request.object?.address
+    ?? request.objectName
+    ?? request.object?.name
+    ?? "Объект не указан"
+  );
+}
+
+function objectName(
+  request: RequestItem,
+) {
+  return (
+    request.objectName
+    ?? request.object?.name
+    ?? objectAddress(request)
+  );
+}
+
+function progressValue(
+  request: RequestItem,
+) {
+  const value =
+    Number(
+      request.progressPercent ?? 0,
+    );
+
+  return Number.isFinite(value)
+    ? Math.max(0, Math.min(100, value))
+    : 0;
+}
+
+function requestTimestamp(
+  request: RequestItem,
+) {
+  const raw =
+    request.createdAt
+    ?? request.updatedAt
+    ?? "";
+
+  const value =
+    new Date(raw).getTime();
+
+  return Number.isFinite(value)
+    ? value
+    : 0;
+}
+
+function dateMatches(
+  request: RequestItem,
+  filter: DateFilter,
+) {
+  if (filter === "all") {
+    return true;
+  }
+
+  const timestamp =
+    requestTimestamp(request);
+
+  if (!timestamp) {
+    return false;
+  }
+
+  const now = Date.now();
+
+  if (filter === "today") {
+    const date =
+      new Date(timestamp);
+
+    const today =
+      new Date();
+
+    return (
+      date.getFullYear()
+        === today.getFullYear()
+      && date.getMonth()
+        === today.getMonth()
+      && date.getDate()
+        === today.getDate()
+    );
+  }
+
+  const days =
+    filter === "7days"
+      ? 7
+      : 30;
+
+  return (
+    timestamp
+    >= now - days * 86400000
+  );
+}
+
+function modeMatches(
+  request: RequestItem,
+  mode: ListMode,
+) {
+  if (mode === "archive") {
+    return true;
+  }
+
+  if (mode === "new") {
+    return [
+      "New",
+      "Repeat",
+      "Defect",
+    ].includes(request.status);
+  }
+
+  if (mode === "completed") {
+    return [
+      "Completed",
+      "Closed",
+    ].includes(request.status);
+  }
+
+  return [
     "Accepted",
     "OnSite",
     "InProgress",
     "Waiting",
     "PartiallyCompleted",
-  ];
+  ].includes(request.status);
+}
 
-const newStatuses:
-  ServiceRequestStatus[] = [
-    "New",
-    "Repeat",
-    "Defect",
-  ];
+function formatDate(
+  value: string | null | undefined,
+) {
+  if (!value) {
+    return "Дата не указана";
+  }
 
-const completedStatuses:
-  ServiceRequestStatus[] = [
-    "Completed",
-    "Closed",
-  ];
+  const date =
+    new Date(value);
 
-export default function ServiceRequestListScreen() {
+  if (
+    Number.isNaN(date.getTime())
+  ) {
+    return "Дата не указана";
+  }
+
+  return date.toLocaleDateString(
+    "ru-RU",
+    {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    },
+  );
+}
+
+function formatSla(
+  value: string | null | undefined,
+  now: number,
+) {
+  if (!value) {
+    return null;
+  }
+
+  const deadline =
+    new Date(value).getTime();
+
+  if (
+    !Number.isFinite(deadline)
+  ) {
+    return null;
+  }
+
+  const delta =
+    deadline - now;
+
+  if (delta <= 0) {
+    return "SLA просрочен";
+  }
+
+  const hours =
+    Math.floor(delta / 3600000);
+
+  const minutes =
+    Math.floor(
+      (delta % 3600000) / 60000,
+    );
+
+  if (hours >= 24) {
+    const days =
+      Math.floor(hours / 24);
+
+    return `SLA: ${days} дн. ${hours % 24} ч.`;
+  }
+
+  return `SLA: ${hours} ч. ${minutes} мин.`;
+}
+
+export default function ServiceRequestListScreen({
+  initialMode = "active",
+  showBack = false,
+  title = "Мои заявки",
+}: ServiceRequestListScreenProps) {
   const [active, setActive] =
-    useState<ServiceRequestSummary[]>([]);
+    useState<RequestItem[]>([]);
 
   const [archive, setArchive] =
-    useState<ServiceRequestSummary[]>([]);
+    useState<RequestItem[]>([]);
 
-  const [activeTab, setActiveTab] =
-    useState<TabName>("current");
+  const [mode, setMode] =
+    useState<ListMode>(
+      initialMode,
+    );
 
   const [search, setSearch] =
     useState("");
+
+  const [objectFilter, setObjectFilter] =
+    useState("");
+
+  const [statusFilter, setStatusFilter] =
+    useState<string>("all");
+
+  const [dateFilter, setDateFilter] =
+    useState<DateFilter>("all");
+
+  const [sortMode, setSortMode] =
+    useState<SortMode>("newest");
+
+  const [filtersVisible, setFiltersVisible] =
+    useState(false);
 
   const [loading, setLoading] =
     useState(true);
@@ -77,30 +399,27 @@ export default function ServiceRequestListScreen() {
   const [refreshing, setRefreshing] =
     useState(false);
 
-  const [acceptingId, setAcceptingId] =
-    useState<number | null>(null);
-
   const [error, setError] =
     useState("");
 
+  const [now, setNow] =
+    useState(Date.now());
+
   const load = useCallback(
     async (refresh = false) => {
-      if (refresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
       try {
+        if (refresh) {
+          setRefreshing(true);
+        }
+
         const [
           activeResult,
           archiveResult,
         ] = await Promise.all([
-          api<ServiceRequestSummary[]>(
+          api<RequestItem[]>(
             "/service-requests",
           ),
-
-          api<ServiceRequestSummary[]>(
+          api<RequestItem[]>(
             "/service-requests?archive=1",
           ),
         ]);
@@ -108,10 +427,10 @@ export default function ServiceRequestListScreen() {
         setActive(activeResult);
         setArchive(archiveResult);
         setError("");
-      } catch (requestError) {
+      } catch (caughtError) {
         setError(
-          requestError instanceof ApiError
-            ? requestError.message
+          caughtError instanceof ApiError
+            ? caughtError.message
             : "Не удалось загрузить заявки",
         );
       } finally {
@@ -125,783 +444,614 @@ export default function ServiceRequestListScreen() {
   useFocusEffect(
     useCallback(() => {
       void load();
+
+      return () => {
+        Keyboard.dismiss();
+      };
     }, [load]),
   );
 
-  const counts = useMemo(() => {
-    return {
-      current: active.filter((request) =>
-        currentStatuses.includes(
-          request.status,
-        ),
-      ).length,
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
 
-      new: active.filter((request) =>
-        newStatuses.includes(
-          request.status,
-        ),
-      ).length,
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 30000);
 
-      completed: active.filter((request) =>
-        completedStatuses.includes(
-          request.status,
-        ),
-      ).length,
-
-      archive: archive.length,
+    return () => {
+      clearInterval(timer);
     };
-  }, [active, archive]);
+  }, []);
 
-  const visibleRequests = useMemo(() => {
-    let source: ServiceRequestSummary[];
+  const filtered = useMemo(() => {
+    const source =
+      mode === "archive"
+        ? archive
+        : active;
 
-    if (activeTab === "archive") {
-      source = archive;
-    } else if (activeTab === "new") {
-      source = active.filter((request) =>
-        newStatuses.includes(
-          request.status,
-        ),
-      );
-    } else if (
-      activeTab === "completed"
-    ) {
-      source = active.filter((request) =>
-        completedStatuses.includes(
-          request.status,
-        ),
-      );
-    } else {
-      source = active.filter((request) =>
-        currentStatuses.includes(
-          request.status,
-        ),
-      );
-    }
+    const cleanSearch =
+      search.trim().toLowerCase();
 
-    const normalizedSearch =
-      search.trim().toLocaleLowerCase(
-        "ru-RU",
-      );
+    const cleanObject =
+      objectFilter
+        .trim()
+        .toLowerCase();
 
-    if (normalizedSearch === "") {
-      return source;
-    }
+    const result =
+      source.filter((request) => {
+        if (
+          !modeMatches(request, mode)
+        ) {
+          return false;
+        }
 
-    return source.filter((request) => {
-      const value = [
-        request.requestNumber,
-        request.title,
-        request.problemType ?? "",
-        request.object.name,
-        request.object.address,
-      ]
-        .join(" ")
-        .toLocaleLowerCase("ru-RU");
+        if (
+          statusFilter !== "all"
+          && request.status
+            !== statusFilter
+        ) {
+          return false;
+        }
 
-      return value.includes(
-        normalizedSearch,
-      );
-    });
+        if (
+          !dateMatches(
+            request,
+            dateFilter,
+          )
+        ) {
+          return false;
+        }
+
+        if (
+          cleanObject
+          && !objectName(request)
+            .toLowerCase()
+            .includes(cleanObject)
+          && !objectAddress(request)
+            .toLowerCase()
+            .includes(cleanObject)
+        ) {
+          return false;
+        }
+
+        if (!cleanSearch) {
+          return true;
+        }
+
+        const haystack = [
+          request.requestNumber,
+          request.title,
+          request.problemType,
+          objectName(request),
+          objectAddress(request),
+          request.primaryTechnicianName,
+          request.technicianName,
+          statusLabel(request.status),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return haystack.includes(
+          cleanSearch,
+        );
+      });
+
+    return [...result].sort(
+      (left, right) => {
+        if (sortMode === "oldest") {
+          return (
+            requestTimestamp(left)
+            - requestTimestamp(right)
+          );
+        }
+
+        if (sortMode === "object") {
+          return objectName(left)
+            .localeCompare(
+              objectName(right),
+              "ru",
+            );
+        }
+
+        return (
+          requestTimestamp(right)
+          - requestTimestamp(left)
+        );
+      },
+    );
   }, [
     active,
-    activeTab,
     archive,
+    dateFilter,
+    mode,
+    objectFilter,
     search,
+    sortMode,
+    statusFilter,
   ]);
 
-  async function acceptRequest(
-    request: ServiceRequestSummary,
+  function openRequest(
+    request: RequestItem,
   ) {
-    if (acceptingId !== null) {
+    if (mode === "archive") {
+      router.push({
+        pathname: "/archive-request",
+        params: {
+          id: String(request.id),
+        },
+      } as unknown as Href);
+
       return;
     }
 
-    setAcceptingId(request.id);
-    setError("");
-
-    try {
-      await api(
-        `/service-requests/${request.id}/accept`,
-        {
-          method: "POST",
-        },
-      );
-
-      await load(true);
-      setActiveTab("current");
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Не удалось принять заявку",
-      );
-    } finally {
-      setAcceptingId(null);
-    }
-  }
-
-  function openRequest(
-    request: ServiceRequestSummary,
-  ) {
-    router.push(
-      `/service-request?id=${request.id}` as never,
-    );
+    router.push({
+      pathname: "/service-request",
+      params: {
+        id: String(request.id),
+      },
+    } as unknown as Href);
   }
 
   return (
     <View style={styles.page}>
-      <View style={styles.header}>
-        <View>
+      {showBack ? (
+        <AppBackHeader title={title} />
+      ) : (
+        <View style={styles.header}>
           <Text style={styles.headerTitle}>
-            Заявки
+            {title}
           </Text>
 
-          <Text style={styles.headerText}>
-            Техническая служба
-          </Text>
-        </View>
-
-        <Pressable
-          style={styles.refreshButton}
-          disabled={refreshing}
-          onPress={() =>
-            void load(true)
-          }
-        >
-          {refreshing ? (
-            <ActivityIndicator
-              size="small"
-              color={colors.primary}
-            />
-          ) : (
-            <Text
-              style={
-                styles.refreshButtonText
-              }
-            >
-              ↻
-            </Text>
-          )}
-        </Pressable>
-      </View>
-
-      <View style={styles.searchArea}>
-        <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>
-            ⌕
-          </Text>
-
-          <TextInput
-            style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Номер, объект или адрес"
-            placeholderTextColor={
-              colors.textSecondary
+          <Pressable
+            onPress={() =>
+              void load(true)
             }
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-          />
-
-          {search !== "" && (
-            <Pressable
-              style={styles.clearSearch}
-              onPress={() =>
-                setSearch("")
-              }
-            >
-              <Text
-                style={
-                  styles.clearSearchText
-                }
-              >
-                ×
-              </Text>
-            </Pressable>
-          )}
+          >
+            <Text style={styles.refreshLink}>
+              Обновить
+            </Text>
+          </Pressable>
         </View>
-      </View>
-
-      <View style={styles.tabs}>
-        <TabButton
-          label="Текущие"
-          count={counts.current}
-          active={activeTab === "current"}
-          onPress={() =>
-            setActiveTab("current")
-          }
-        />
-
-        <TabButton
-          label="Новые"
-          count={counts.new}
-          active={activeTab === "new"}
-          onPress={() =>
-            setActiveTab("new")
-          }
-        />
-
-        <TabButton
-          label="Готовые"
-          count={counts.completed}
-          active={activeTab === "completed"}
-          onPress={() =>
-            setActiveTab("completed")
-          }
-        />
-
-        <TabButton
-          label="Архив"
-          count={counts.archive}
-          active={activeTab === "archive"}
-          onPress={() =>
-            setActiveTab("archive")
-          }
-        />
-      </View>
+      )}
 
       {!!error && (
-        <View style={styles.error}>
+        <View style={styles.errorBox}>
           <Text style={styles.errorText}>
             {error}
           </Text>
         </View>
       )}
 
+      <View style={styles.searchRow}>
+        <TextInput
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Номер, адрес или ФИО техника"
+          placeholderTextColor="#98a39e"
+          returnKeyType="search"
+          autoCorrect={false}
+        />
+
+        <Pressable
+          style={[
+            styles.filterButton,
+            filtersVisible
+              && styles.filterButtonActive,
+          ]}
+          onPress={() =>
+            setFiltersVisible(
+              (value) => !value,
+            )
+          }
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              filtersVisible
+                && styles.filterButtonTextActive,
+            ]}
+          >
+            Фильтры
+          </Text>
+        </Pressable>
+      </View>
+
+      {!showBack && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.modeTabs}
+        >
+          {modes.map((item) => {
+            const selected =
+              item.value === mode;
+
+            return (
+              <Pressable
+                key={item.value}
+                style={[
+                  styles.modeTab,
+                  selected
+                    && styles.modeTabSelected,
+                ]}
+                onPress={() =>
+                  setMode(item.value)
+                }
+              >
+                <Text
+                  style={[
+                    styles.modeTabText,
+                    selected
+                      && styles.modeTabTextSelected,
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {filtersVisible && (
+        <View style={styles.filters}>
+          <Text style={styles.filterLabel}>
+            Объект
+          </Text>
+
+          <TextInput
+            style={styles.objectInput}
+            value={objectFilter}
+            onChangeText={setObjectFilter}
+            placeholder="Название или адрес объекта"
+            placeholderTextColor="#98a39e"
+          />
+
+          <Text style={styles.filterLabel}>
+            Статус
+          </Text>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chips}
+          >
+            {statuses.map((status) => {
+              const selected =
+                statusFilter === status;
+
+              return (
+                <Pressable
+                  key={status}
+                  style={[
+                    styles.chip,
+                    selected
+                      && styles.chipSelected,
+                  ]}
+                  onPress={() =>
+                    setStatusFilter(status)
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      selected
+                        && styles.chipTextSelected,
+                    ]}
+                  >
+                    {status === "all"
+                      ? "Все"
+                      : statusLabel(status)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <Text style={styles.filterLabel}>
+            Дата
+          </Text>
+
+          <View style={styles.wrapChips}>
+            {dateFilters.map((item) => {
+              const selected =
+                dateFilter === item.value;
+
+              return (
+                <Pressable
+                  key={item.value}
+                  style={[
+                    styles.chip,
+                    selected
+                      && styles.chipSelected,
+                  ]}
+                  onPress={() =>
+                    setDateFilter(
+                      item.value,
+                    )
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      selected
+                        && styles.chipTextSelected,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={styles.filterLabel}>
+            Сортировка
+          </Text>
+
+          <View style={styles.wrapChips}>
+            {sortModes.map((item) => {
+              const selected =
+                sortMode === item.value;
+
+              return (
+                <Pressable
+                  key={item.value}
+                  style={[
+                    styles.chip,
+                    selected
+                      && styles.chipSelected,
+                  ]}
+                  onPress={() =>
+                    setSortMode(item.value)
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      selected
+                        && styles.chipTextSelected,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
+      <View style={styles.resultHeader}>
+        <Text style={styles.resultCount}>
+          Найдено: {filtered.length}
+        </Text>
+
+        {(search
+          || objectFilter
+          || statusFilter !== "all"
+          || dateFilter !== "all") && (
+          <Pressable
+            onPress={() => {
+              setSearch("");
+              setObjectFilter("");
+              setStatusFilter("all");
+              setDateFilter("all");
+            }}
+          >
+            <Text style={styles.clearLink}>
+              Сбросить
+            </Text>
+          </Pressable>
+        )}
+      </View>
+
       {loading ? (
         <View style={styles.loading}>
           <ActivityIndicator
             color={colors.primary}
           />
-
-          <Text style={styles.loadingText}>
-            Загружаем заявки…
-          </Text>
         </View>
       ) : (
         <FlatList
-          data={visibleRequests}
+          data={filtered}
           keyExtractor={(item) =>
             String(item.id)
           }
+          contentContainerStyle={
+            filtered.length === 0
+              ? styles.emptyList
+              : styles.list
+          }
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={Keyboard.dismiss}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
+              tintColor={colors.primary}
               onRefresh={() =>
                 void load(true)
               }
-              tintColor={colors.primary}
-              colors={[colors.primary]}
             />
           }
-          contentContainerStyle={[
-            styles.list,
-            visibleRequests.length === 0 &&
-              styles.emptyList,
-          ]}
-          ItemSeparatorComponent={() => (
-            <View
-              style={styles.separator}
-            />
-          )}
           ListEmptyComponent={
-            <EmptyState
-              tab={activeTab}
-              search={search}
-            />
+            <View style={styles.empty}>
+              <Text style={styles.emptyTitle}>
+                Заявки не найдены
+              </Text>
+
+              <Text style={styles.emptyText}>
+                Измените фильтры или обновите
+                список.
+              </Text>
+            </View>
           }
-          renderItem={({ item }) => (
-            <RequestCard
-              request={item}
-              accepting={
-                acceptingId === item.id
-              }
-              onOpen={() =>
-                openRequest(item)
-              }
-              onAccept={() =>
-                void acceptRequest(item)
-              }
-            />
-          )}
+          renderItem={({ item }) => {
+            const progress =
+              progressValue(item);
+
+            const sla =
+              formatSla(
+                item.slaDeadline,
+                now,
+              );
+
+            return (
+              <Pressable
+                style={styles.card}
+                onPress={() =>
+                  openRequest(item)
+                }
+              >
+                <View style={styles.cardTop}>
+                  <View style={styles.cardTitleWrap}>
+                    <Text style={styles.cardNumber}>
+                      {item.requestNumber
+                        ?? `Заявка №${item.id}`}
+                    </Text>
+
+                    <Text style={styles.cardDate}>
+                      {formatDate(
+                        item.createdAt
+                        ?? item.updatedAt,
+                      )}
+                    </Text>
+                  </View>
+
+                  <View style={styles.statusBadge}>
+                    <Text
+                      style={
+                        styles.statusBadgeText
+                      }
+                    >
+                      {statusLabel(item.status)}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text
+                  style={styles.address}
+                  numberOfLines={2}
+                >
+                  {objectAddress(item)}
+                </Text>
+
+                {!!(
+                  item.primaryTechnicianName
+                  ?? item.technicianName
+                ) && (
+                  <Text style={styles.technician}>
+                    Техник:{" "}
+                    {item.primaryTechnicianName
+                      ?? item.technicianName}
+                  </Text>
+                )}
+
+                <View style={styles.tags}>
+                  {(item.isDefect
+                    || item.status
+                      === "Defect") && (
+                    <View style={styles.defectTag}>
+                      <Text
+                        style={
+                          styles.defectText
+                        }
+                      >
+                        Брак
+                      </Text>
+                    </View>
+                  )}
+
+                  {(item.isRepeat
+                    || item.status
+                      === "Repeat") && (
+                    <View style={styles.repeatTag}>
+                      <Text
+                        style={
+                          styles.repeatText
+                        }
+                      >
+                        ↻ Повтор
+                      </Text>
+                    </View>
+                  )}
+
+                  {!!sla && (
+                    <View
+                      style={[
+                        styles.slaTag,
+                        sla.includes(
+                          "просрочен",
+                        )
+                          && styles.slaDanger,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.slaText,
+                          sla.includes(
+                            "просрочен",
+                          )
+                            && styles.slaDangerText,
+                        ]}
+                      >
+                        {sla}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <View
+                  style={
+                    styles.progressHeader
+                  }
+                >
+                  <Text
+                    style={
+                      styles.progressCaption
+                    }
+                  >
+                    Выполнение
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.progressNumber
+                    }
+                  >
+                    {Math.round(progress)}%
+                  </Text>
+                </View>
+
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width:
+                          `${progress}%`,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <Text style={styles.openLink}>
+                  {mode === "archive"
+                    ? "Открыть в режиме просмотра ›"
+                    : "Открыть заявку ›"}
+                </Text>
+              </Pressable>
+            );
+          }}
         />
       )}
     </View>
   );
-}
-
-type TabButtonProps = {
-  label: string;
-  count: number;
-  active: boolean;
-  onPress: () => void;
-};
-
-function TabButton({
-  label,
-  count,
-  active,
-  onPress,
-}: TabButtonProps) {
-  return (
-    <Pressable
-      style={[
-        styles.tab,
-        active && styles.tabActive,
-      ]}
-      onPress={onPress}
-    >
-      <Text
-        style={[
-          styles.tabText,
-          active && styles.tabTextActive,
-        ]}
-      >
-        {label}
-      </Text>
-
-      {count > 0 && (
-        <View
-          style={[
-            styles.tabCount,
-            active &&
-              styles.tabCountActive,
-          ]}
-        >
-          <Text
-            style={[
-              styles.tabCountText,
-              active &&
-                styles.tabCountTextActive,
-            ]}
-          >
-            {count > 99 ? "99+" : count}
-          </Text>
-        </View>
-      )}
-    </Pressable>
-  );
-}
-
-type RequestCardProps = {
-  request: ServiceRequestSummary;
-  accepting: boolean;
-  onOpen: () => void;
-  onAccept: () => void;
-};
-
-function RequestCard({
-  request,
-  accepting,
-  onOpen,
-  onAccept,
-}: RequestCardProps) {
-  const progress = clampProgress(
-    request.progressPercent,
-  );
-
-  const canAccept = [
-    "New",
-    "Repeat",
-    "Defect",
-  ].includes(request.status);
-
-  const sla = slaText(
-    request.slaDeadline,
-  );
-
-  return (
-    <Pressable
-      style={styles.card}
-      onPress={onOpen}
-    >
-      <View style={styles.cardTop}>
-        <View style={styles.numberRow}>
-          <Text style={styles.number}>
-            № {request.requestNumber}
-          </Text>
-
-          <StatusBadge
-            status={request.status}
-          />
-        </View>
-
-        <Text style={styles.cardTitle}>
-          {request.title}
-        </Text>
-      </View>
-
-      {(request.isRepeat ||
-        request.isDefect) && (
-        <View style={styles.flags}>
-          {request.isRepeat && (
-            <View
-              style={styles.repeatFlag}
-            >
-              <Text
-                style={
-                  styles.repeatFlagText
-                }
-              >
-                ↻ Повторная
-              </Text>
-            </View>
-          )}
-
-          {request.isDefect && (
-            <View
-              style={styles.defectFlag}
-            >
-              <Text
-                style={
-                  styles.defectFlagText
-                }
-              >
-                ! Брак
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
-
-      <View style={styles.objectBlock}>
-        <Text style={styles.objectName}>
-          {request.object.name}
-        </Text>
-
-        <Text style={styles.address}>
-          {request.object.address}
-        </Text>
-      </View>
-
-      <View style={styles.infoRow}>
-        <View style={styles.infoItem}>
-          <Text style={styles.infoLabel}>
-            Приоритет
-          </Text>
-
-          <Text
-            style={[
-              styles.infoValue,
-              {
-                color: priorityColor(
-                  request.priority,
-                ),
-              },
-            ]}
-          >
-            {
-              servicePriorityLabels[
-                request.priority
-              ]
-            }
-          </Text>
-        </View>
-
-        <View style={styles.infoItem}>
-          <Text style={styles.infoLabel}>
-            SLA
-          </Text>
-
-          <Text
-            style={[
-              styles.infoValue,
-              sla.expired &&
-                styles.slaExpired,
-            ]}
-          >
-            {sla.text}
-          </Text>
-        </View>
-
-        <View style={styles.infoItem}>
-          <Text style={styles.infoLabel}>
-            Роль
-          </Text>
-
-          <Text style={styles.infoValue}>
-            {request.assignmentRole ===
-            "Assistant"
-              ? "Соисполнитель"
-              : "Основной"}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.progressHeading}>
-        <Text style={styles.progressLabel}>
-          Выполнение
-        </Text>
-
-        <Text style={styles.progressValue}>
-          {Math.round(progress)}%
-        </Text>
-      </View>
-
-      <View style={styles.progressTrack}>
-        <View
-          style={[
-            styles.progressFill,
-            {
-              width:
-                `${progress}%` as `${number}%`,
-            },
-          ]}
-        />
-      </View>
-
-      <View style={styles.cardBottom}>
-        {canAccept ? (
-          <Pressable
-            style={[
-              styles.acceptButton,
-              accepting &&
-                styles.disabled,
-            ]}
-            disabled={accepting}
-            onPress={(event) => {
-              event.stopPropagation();
-              onAccept();
-            }}
-          >
-            {accepting ? (
-              <ActivityIndicator
-                size="small"
-                color={colors.white}
-              />
-            ) : (
-              <Text
-                style={
-                  styles.acceptButtonText
-                }
-              >
-                Принять заявку
-              </Text>
-            )}
-          </Pressable>
-        ) : (
-          <Text style={styles.openText}>
-            Открыть заявку
-          </Text>
-        )}
-
-        <Text style={styles.arrow}>
-          ›
-        </Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function StatusBadge({
-  status,
-}: {
-  status: ServiceRequestStatus;
-}) {
-  const appearance =
-    statusAppearance(status);
-
-  return (
-    <View
-      style={[
-        styles.statusBadge,
-        {
-          backgroundColor:
-            appearance.background,
-        },
-      ]}
-    >
-      <Text
-        style={[
-          styles.statusBadgeText,
-          {
-            color: appearance.text,
-          },
-        ]}
-      >
-        {serviceStatusLabels[status]}
-      </Text>
-    </View>
-  );
-}
-
-function EmptyState({
-  tab,
-  search,
-}: {
-  tab: TabName;
-  search: string;
-}) {
-  let title = "Заявок пока нет";
-  let text =
-    "Новые заявки появятся после назначения диспетчером.";
-
-  if (search.trim() !== "") {
-    title = "Ничего не найдено";
-    text =
-      "Попробуйте изменить поисковый запрос.";
-  } else if (tab === "archive") {
-    title = "Архив пуст";
-    text =
-      "Здесь появятся завершённые архивные заявки.";
-  } else if (tab === "completed") {
-    title = "Нет выполненных заявок";
-    text =
-      "Выполненные и закрытые заявки появятся здесь.";
-  }
-
-  return (
-    <View style={styles.empty}>
-      <View style={styles.emptyIcon}>
-        <Text style={styles.emptyIconText}>
-          ✓
-        </Text>
-      </View>
-
-      <Text style={styles.emptyTitle}>
-        {title}
-      </Text>
-
-      <Text style={styles.emptyText}>
-        {text}
-      </Text>
-    </View>
-  );
-}
-
-function priorityColor(
-  priority: ServiceRequestSummary["priority"],
-): string {
-  if (priority === "Critical") {
-    return colors.danger;
-  }
-
-  if (priority === "High") {
-    return "#c77814";
-  }
-
-  if (priority === "Low") {
-    return colors.textSecondary;
-  }
-
-  return colors.primaryHover;
-}
-
-function statusAppearance(
-  status: ServiceRequestStatus,
-) {
-  if (status === "Defect") {
-    return {
-      background: colors.dangerSoft,
-      text: colors.danger,
-    };
-  }
-
-  if (status === "Repeat") {
-    return {
-      background: "#fff4dc",
-      text: "#a36512",
-    };
-  }
-
-  if (
-    status === "Waiting" ||
-    status === "PartiallyCompleted"
-  ) {
-    return {
-      background: "#fff8e4",
-      text: "#96680b",
-    };
-  }
-
-  if (
-    status === "Completed" ||
-    status === "Closed"
-  ) {
-    return {
-      background: colors.primarySoft,
-      text: colors.primaryHover,
-    };
-  }
-
-  if (
-    status === "InProgress" ||
-    status === "OnSite"
-  ) {
-    return {
-      background: "#e8f2ff",
-      text: "#2869a8",
-    };
-  }
-
-  return {
-    background: colors.surfaceSoft,
-    text: colors.textSecondary,
-  };
-}
-
-function slaText(
-  deadline: string | null,
-): {
-  text: string;
-  expired: boolean;
-} {
-  if (!deadline) {
-    return {
-      text: "Не указан",
-      expired: false,
-    };
-  }
-
-  const target =
-    new Date(deadline).getTime();
-
-  if (!Number.isFinite(target)) {
-    return {
-      text: "Не указан",
-      expired: false,
-    };
-  }
-
-  const difference =
-    target - Date.now();
-
-  const expired = difference < 0;
-  const absolute = Math.abs(difference);
-
-  const totalMinutes = Math.max(
-    1,
-    Math.floor(absolute / 60000),
-  );
-
-  const days = Math.floor(
-    totalMinutes / 1440,
-  );
-
-  const hours = Math.floor(
-    (totalMinutes % 1440) / 60,
-  );
-
-  const minutes = totalMinutes % 60;
-
-  let value: string;
-
-  if (days > 0) {
-    value = `${days} д ${hours} ч`;
-  } else if (hours > 0) {
-    value = `${hours} ч ${minutes} мин`;
-  } else {
-    value = `${minutes} мин`;
-  }
-
-  return {
-    text: expired
-      ? `Просрочено ${value}`
-      : `Осталось ${value}`,
-    expired,
-  };
 }
 
 const styles = StyleSheet.create({
@@ -911,7 +1061,7 @@ const styles = StyleSheet.create({
   },
 
   header: {
-    minHeight: 66,
+    minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -924,410 +1074,362 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: colors.text,
     fontSize: 20,
-    fontWeight: "700",
+    fontWeight: "900",
   },
 
-  headerText: {
-    marginTop: 2,
-    color: colors.textSecondary,
-    fontSize: 11,
-  },
-
-  refreshButton: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-  },
-
-  refreshButtonText: {
+  refreshLink: {
     color: colors.primary,
-    fontSize: 24,
-    lineHeight: 25,
-  },
-
-  searchArea: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    backgroundColor: colors.surface,
-  },
-
-  searchBox: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 11,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: colors.surfaceSoft,
-  },
-
-  searchIcon: {
-    marginRight: 8,
-    color: colors.textSecondary,
-    fontSize: 20,
-  },
-
-  searchInput: {
-    minWidth: 0,
-    flex: 1,
-    color: colors.text,
-    fontSize: 13,
-  },
-
-  clearSearch: {
-    width: 30,
-    height: 30,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  clearSearchText: {
-    color: colors.textSecondary,
-    fontSize: 23,
-  },
-
-  tabs: {
-    minHeight: 54,
-    flexDirection: "row",
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    gap: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-
-  tab: {
-    minWidth: 0,
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    paddingHorizontal: 4,
-    borderRadius: 8,
-  },
-
-  tabActive: {
-    backgroundColor: colors.primarySoft,
-  },
-
-  tabText: {
-    color: colors.textSecondary,
-    fontSize: 10,
-  },
-
-  tabTextActive: {
-    color: colors.primaryHover,
+    fontSize: 12,
     fontWeight: "700",
   },
 
-  tabCount: {
-    minWidth: 18,
-    height: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 4,
-    borderRadius: 9,
-    backgroundColor: colors.surfaceSoft,
-  },
-
-  tabCountActive: {
-    backgroundColor: colors.primary,
-  },
-
-  tabCountText: {
-    color: colors.textSecondary,
-    fontSize: 9,
-    fontWeight: "700",
-  },
-
-  tabCountTextActive: {
-    color: colors.white,
-  },
-
-  error: {
-    margin: 12,
-    marginBottom: 0,
-    padding: 11,
-    borderWidth: 1,
-    borderColor: "#f3c7cb",
-    borderRadius: 9,
+  errorBox: {
+    padding: 10,
     backgroundColor: colors.dangerSoft,
   },
 
   errorText: {
-    color: "#a52d36",
+    color: colors.danger,
     fontSize: 12,
-    lineHeight: 16,
+    textAlign: "center",
   },
 
-  loading: {
+  searchRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 11,
+  },
+
+  searchInput: {
+    minHeight: 45,
     flex: 1,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 11,
+    color: colors.text,
+    backgroundColor: colors.surface,
+  },
+
+  filterButton: {
+    minHeight: 45,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 11,
+    backgroundColor: colors.surface,
   },
 
-  loadingText: {
+  filterButtonActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+
+  filterButtonText: {
     color: colors.textSecondary,
     fontSize: 12,
+    fontWeight: "700",
   },
 
-  list: {
+  filterButtonTextActive: {
+    color: colors.primary,
+  },
+
+  modeTabs: {
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+
+  modeTab: {
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+
+  modeTabSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+
+  modeTabText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  modeTabTextSelected: {
+    color: colors.primary,
+  },
+
+  filters: {
+    marginHorizontal: 12,
+    marginBottom: 8,
     padding: 12,
-    paddingBottom: 24,
-  },
-
-  emptyList: {
-    flexGrow: 1,
-  },
-
-  separator: {
-    height: 10,
-  },
-
-  card: {
-    padding: 14,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 13,
     backgroundColor: colors.surface,
   },
 
-  cardTop: {
-    gap: 7,
-  },
-
-  numberRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-
-  number: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-
-  statusBadge: {
-    maxWidth: "54%",
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 7,
-  },
-
-  statusBadgeText: {
-    fontSize: 9,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-
-  cardTitle: {
+  filterLabel: {
+    marginTop: 9,
+    marginBottom: 7,
     color: colors.text,
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "700",
+    fontSize: 12,
+    fontWeight: "800",
   },
 
-  flags: {
+  objectInput: {
+    minHeight: 44,
+    paddingHorizontal: 11,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    color: colors.text,
+  },
+
+  chips: {
+    gap: 6,
+  },
+
+  wrapChips: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: 10,
   },
 
-  repeatFlag: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: "#fff4dc",
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 9,
   },
 
-  repeatFlagText: {
-    color: "#a36512",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-
-  defectFlag: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: colors.dangerSoft,
-  },
-
-  defectFlagText: {
-    color: colors.danger,
-    fontSize: 10,
-    fontWeight: "700",
-  },
-
-  objectBlock: {
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceSoft,
-  },
-
-  objectName: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-
-  address: {
-    marginTop: 3,
-    color: colors.textSecondary,
-    fontSize: 11,
-    lineHeight: 15,
-  },
-
-  infoRow: {
-    flexDirection: "row",
-    marginTop: 12,
-    gap: 8,
-  },
-
-  infoItem: {
-    minWidth: 0,
-    flex: 1,
-  },
-
-  infoLabel: {
-    color: colors.textSecondary,
-    fontSize: 9,
-  },
-
-  infoValue: {
-    marginTop: 3,
-    color: colors.text,
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: "600",
-  },
-
-  slaExpired: {
-    color: colors.danger,
-  },
-
-  progressHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 13,
-  },
-
-  progressLabel: {
-    color: colors.textSecondary,
-    fontSize: 10,
-  },
-
-  progressValue: {
-    color: colors.text,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-
-  progressTrack: {
-    height: 6,
-    marginTop: 6,
-    overflow: "hidden",
-    borderRadius: 3,
-    backgroundColor: colors.border,
-  },
-
-  progressFill: {
-    height: "100%",
-    borderRadius: 3,
-    backgroundColor: colors.primary,
-  },
-
-  cardBottom: {
-    minHeight: 41,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 13,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-
-  acceptButton: {
-    minWidth: 145,
-    minHeight: 38,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: colors.primary,
-  },
-
-  acceptButtonText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-
-  openText: {
-    color: colors.primaryHover,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-
-  arrow: {
-    color: colors.textSecondary,
-    fontSize: 24,
-  },
-
-  disabled: {
-    opacity: 0.5,
-  },
-
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 35,
-  },
-
-  emptyIcon: {
-    width: 54,
-    height: 54,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 27,
+  chipSelected: {
+    borderColor: colors.primary,
     backgroundColor: colors.primarySoft,
   },
 
-  emptyIconText: {
+  chipText: {
+    color: colors.textSecondary,
+    fontSize: 10,
+  },
+
+  chipTextSelected: {
     color: colors.primary,
-    fontSize: 23,
+    fontWeight: "800",
+  },
+
+  resultHeader: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+  },
+
+  resultCount: {
+    color: colors.textSecondary,
+    fontSize: 10,
+  },
+
+  clearLink: {
+    color: colors.primary,
+    fontSize: 10,
     fontWeight: "700",
   },
 
+  loading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  list: {
+    paddingHorizontal: 12,
+    paddingBottom: 35,
+  },
+
+  emptyList: {
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 25,
+  },
+
+  empty: {
+    alignItems: "center",
+  },
+
   emptyTitle: {
-    marginTop: 14,
     color: colors.text,
     fontSize: 16,
-    fontWeight: "700",
-    textAlign: "center",
+    fontWeight: "800",
   },
 
   emptyText: {
     marginTop: 6,
     color: colors.textSecondary,
     fontSize: 12,
-    lineHeight: 17,
     textAlign: "center",
+  },
+
+  card: {
+    marginBottom: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+  },
+
+  cardTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 9,
+  },
+
+  cardTitleWrap: {
+    flex: 1,
+  },
+
+  cardNumber: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  cardDate: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 10,
+  },
+
+  statusBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: colors.primarySoft,
+  },
+
+  statusBadgeText: {
+    color: colors.primary,
+    fontSize: 9,
+    fontWeight: "800",
+  },
+
+  address: {
+    marginTop: 10,
+    color: colors.text,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+
+  technician: {
+    marginTop: 5,
+    color: colors.textSecondary,
+    fontSize: 10,
+  },
+
+  tags: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 10,
+  },
+
+  defectTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: colors.dangerSoft,
+  },
+
+  defectText: {
+    color: colors.danger,
+    fontSize: 9,
+    fontWeight: "800",
+  },
+
+  repeatTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: colors.primarySoft,
+  },
+
+  repeatText: {
+    color: colors.primary,
+    fontSize: 9,
+    fontWeight: "800",
+  },
+
+  slaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: "#fff3d9",
+  },
+
+  slaDanger: {
+    backgroundColor: colors.dangerSoft,
+  },
+
+  slaText: {
+    color: "#9b6714",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+
+  slaDangerText: {
+    color: colors.danger,
+  },
+
+  progressHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 13,
+  },
+
+  progressCaption: {
+    color: colors.textSecondary,
+    fontSize: 10,
+  },
+
+  progressNumber: {
+    color: colors.text,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  progressTrack: {
+    height: 7,
+    marginTop: 6,
+    overflow: "hidden",
+    borderRadius: 5,
+    backgroundColor: colors.border,
+  },
+
+  progressFill: {
+    height: "100%",
+    borderRadius: 5,
+    backgroundColor: colors.primary,
+  },
+
+  openLink: {
+    marginTop: 12,
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "800",
+    textAlign: "right",
   },
 });

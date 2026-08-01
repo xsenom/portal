@@ -46,17 +46,32 @@ type ProfileSummary = {
   } | null;
 };
 
+type ExtendedUser = {
+  id: number;
+  login: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  middleName?: string | null;
+  role: string;
+  serviceRole?: string | null;
+  position?: string | null;
+  category?: string | null;
+  employmentDate?: string | null;
+  avatarUrl?: string | null;
+};
+
 function avatarUri(
   value: string | null | undefined,
-): string | null {
+) {
   if (!value) {
     return null;
   }
 
   if (
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("data:")
+    value.startsWith("http://")
+    || value.startsWith("https://")
+    || value.startsWith("data:")
   ) {
     return value;
   }
@@ -66,15 +81,18 @@ function avatarUri(
 
 export default function ProfileScreen() {
   const {
-    user,
-    logout,
+    user: authUser,
     refresh,
+    logout,
   } = useAuth();
+
+  const user =
+    authUser as ExtendedUser | null;
 
   const [summary, setSummary] =
     useState<ProfileSummary | null>(null);
 
-  const [loadingSummary, setLoadingSummary] =
+  const [loading, setLoading] =
     useState(true);
 
   const [avatarBusy, setAvatarBusy] =
@@ -83,26 +101,9 @@ export default function ProfileScreen() {
   const [error, setError] =
     useState("");
 
-  const fullName = [
-    user?.lastName,
-    user?.firstName,
-    user?.middleName,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const initials = `${user?.lastName?.[0] ?? ""}${
-    user?.firstName?.[0] ?? ""
-  }`.toUpperCase() || "П";
-
-  const imageUri = useMemo(
-    () => avatarUri(user?.avatarUrl),
-    [user?.avatarUrl],
-  );
-
-  const loadSummary = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      setLoadingSummary(true);
+      setLoading(true);
 
       const result =
         await api<ProfileSummary>(
@@ -115,17 +116,37 @@ export default function ProfileScreen() {
       setError(
         caughtError instanceof ApiError
           ? caughtError.message
-          : "Не удалось загрузить показатели",
+          : "Не удалось загрузить статистику",
       );
     } finally {
-      setLoadingSummary(false);
+      setLoading(false);
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadSummary();
-    }, [loadSummary]),
+      void load();
+    }, [load]),
+  );
+
+  const fullName = [
+    user?.lastName,
+    user?.firstName,
+    user?.middleName,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const initials =
+    `${user?.lastName?.[0] ?? ""}${
+      user?.firstName?.[0] ?? ""
+    }`.toUpperCase() || "П";
+
+  const imageUri = useMemo(
+    () => avatarUri(
+      user?.avatarUrl,
+    ),
+    [user?.avatarUrl],
   );
 
   async function chooseAvatar() {
@@ -137,31 +158,38 @@ export default function ProfileScreen() {
       setAvatarBusy(true);
 
       const permission =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
+        await ImagePicker
+          .requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
         Alert.alert(
           "Нет доступа",
-          "Разрешите доступ к фотографиям.",
+          "Разрешите приложению доступ к фотографиям.",
         );
+
         return;
       }
 
       const result =
-        await ImagePicker.launchImageLibraryAsync({
-          mediaTypes:
-            ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.55,
-          base64: true,
-        });
+        await ImagePicker
+          .launchImageLibraryAsync({
+            mediaTypes:
+              ImagePicker
+                .MediaTypeOptions
+                .Images,
+
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.6,
+            base64: true,
+          });
 
       if (result.canceled) {
         return;
       }
 
-      const asset = result.assets[0];
+      const asset =
+        result.assets[0];
 
       if (!asset.base64) {
         throw new Error(
@@ -170,38 +198,45 @@ export default function ProfileScreen() {
       }
 
       const mimeType =
-        asset.mimeType ?? "image/jpeg";
+        asset.mimeType
+        ?? "image/jpeg";
 
-      await api("/profile/avatar", {
-        method: "POST",
-        body: JSON.stringify({
-          dataUrl:
-            `data:${mimeType};base64,`
-            + asset.base64,
-        }),
-      });
+      await api(
+        "/profile/avatar",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            dataUrl:
+              `data:${mimeType};base64,`
+              + asset.base64,
+          }),
+        },
+      );
 
       await refresh();
 
       Alert.alert(
         "Готово",
-        "Аватар обновлён.",
+        "Фото профиля обновлено.",
       );
     } catch (caughtError) {
       Alert.alert(
         "Ошибка",
         caughtError instanceof Error
           ? caughtError.message
-          : "Не удалось обновить аватар",
+          : "Не удалось обновить фото",
       );
     } finally {
       setAvatarBusy(false);
     }
   }
 
-  async function handleLogout() {
+  async function leaveProfile() {
     await logout();
-    router.replace("/login");
+
+    router.replace(
+      "/login" as unknown as Href,
+    );
   }
 
   return (
@@ -213,7 +248,6 @@ export default function ProfileScreen() {
       </View>
 
       <ScrollView
-        style={styles.scroll}
         contentContainerStyle={styles.content}
       >
         {!!error && (
@@ -224,11 +258,13 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <View style={styles.profileSummary}>
+        <View style={styles.profile}>
           <Pressable
             style={styles.avatar}
             disabled={avatarBusy}
-            onPress={() => void chooseAvatar()}
+            onPress={() =>
+              void chooseAvatar()
+            }
           >
             {imageUri ? (
               <Image
@@ -255,127 +291,194 @@ export default function ProfileScreen() {
             </View>
           </Pressable>
 
-          <View style={styles.profileName}>
+          <View style={styles.profileMain}>
             <Text style={styles.fullName}>
-              {fullName || user?.login || "Профиль"}
+              {fullName
+                || user?.login
+                || "Пользователь"}
             </Text>
 
-            <Pressable
-              onPress={() => {
-                router.push(
-                  "/profile-details" as Href,
-                );
-              }}
-            >
-              <Text style={styles.detailsLink}>
-                Подробнее ›
-              </Text>
-            </Pressable>
+            <Text style={styles.position}>
+              {user?.position
+                ?? user?.serviceRole
+                ?? "Техник"}
+            </Text>
+
+            <Text style={styles.email}>
+              {user?.email ?? ""}
+            </Text>
           </View>
         </View>
 
-        <View style={styles.hoursCard}>
-          <Text style={styles.hoursIcon}>
-            ◷
+        <Pressable
+          style={styles.closedButton}
+          onPress={() => {
+            router.push(
+              "/my-closed-requests"
+                as unknown as Href,
+            );
+          }}
+        >
+          <View style={styles.closedIcon}>
+            <Text style={styles.closedIconText}>
+              ✓
+            </Text>
+          </View>
+
+          <View style={styles.closedMain}>
+            <Text style={styles.closedTitle}>
+              Мои закрытые заявки
+            </Text>
+
+            <Text style={styles.closedCaption}>
+              Просмотр выполненных и закрытых
+              заявок
+            </Text>
+          </View>
+
+          <Text style={styles.arrow}>
+            ›
           </Text>
-
-          <View style={styles.hoursMain}>
-            {loadingSummary ? (
-              <ActivityIndicator
-                color={colors.white}
-              />
-            ) : (
-              <>
-                <Text style={styles.hoursTitle}>
-                  {summary?.hoursWorked ?? 0} ч
-                </Text>
-
-                <Text style={styles.hoursText}>
-                  Отработано в этом месяце
-                  {summary?.hoursNorm !== null &&
-                  summary?.hoursNorm !== undefined
-                    ? ` из ${summary.hoursNorm} ч`
-                    : ""}
-                </Text>
-              </>
-            )}
-          </View>
-        </View>
+        </Pressable>
 
         <View style={styles.card}>
-          <View style={styles.cardHeading}>
+          <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>
-              Показатели
+              Моя статистика
             </Text>
 
             <Pressable
-              onPress={() => void loadSummary()}
+              onPress={() => void load()}
             >
-              <Text style={styles.detailsLink}>
+              <Text style={styles.refresh}>
                 Обновить
               </Text>
             </Pressable>
           </View>
 
-          <View style={styles.indicators}>
-            <Indicator
-              value={summary?.completedShifts ?? 0}
-              label="смен"
+          {loading ? (
+            <ActivityIndicator
+              color={colors.primary}
             />
+          ) : (
+            <>
+              <View style={styles.stats}>
+                <Stat
+                  value={
+                    summary?.completedRequests
+                    ?? 0
+                  }
+                  label="Выполнено"
+                />
 
-            <Indicator
-              value={summary?.finesCount ?? 0}
-              label="штрафы"
-              border
-            />
+                <Stat
+                  value={
+                    summary?.activeRequests
+                    ?? 0
+                  }
+                  label="В работе"
+                  border
+                />
 
-            <Indicator
-              value={`${summary?.hourlyRate ?? 0} ₽`}
-              label="ставка/час"
-              border
-            />
-          </View>
+                <Stat
+                  value={
+                    summary?.archiveRequests
+                    ?? 0
+                  }
+                  label="В архиве"
+                  border
+                />
+              </View>
 
-          <View style={styles.indicatorsSecond}>
-            <Indicator
-              value={summary?.activeRequests ?? 0}
-              label="в работе"
-            />
+              <View style={styles.statsSecond}>
+                <Stat
+                  value={
+                    summary?.completedShifts
+                    ?? 0
+                  }
+                  label="Смен"
+                />
 
-            <Indicator
-              value={summary?.completedRequests ?? 0}
-              label="выполнено"
-              border
-            />
+                <Stat
+                  value={`${summary?.hoursWorked ?? 0}`}
+                  label="Часов"
+                  border
+                />
 
-            <Indicator
-              value={summary?.archiveRequests ?? 0}
-              label="в архиве"
-              border
-            />
-          </View>
+                <Stat
+                  value={
+                    summary?.finesCount
+                    ?? 0
+                  }
+                  label="Штрафов"
+                  border
+                />
+              </View>
+            </>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>
+            Личные данные
+          </Text>
+
+          <DataRow
+            label="Логин"
+            value={user?.login ?? "—"}
+          />
+
+          <DataRow
+            label="Должность"
+            value={
+              user?.position
+              ?? "Не указана"
+            }
+          />
+
+          <DataRow
+            label="Категория"
+            value={
+              user?.category
+              ?? "Не указана"
+            }
+          />
+
+          <DataRow
+            label="Роль"
+            value={
+              user?.serviceRole
+              ?? (
+                user?.role === "Admin"
+                  ? "Администратор"
+                  : "Техник"
+              )
+            }
+          />
         </View>
 
         {user?.role === "Admin" && (
           <Pressable
             style={styles.adminButton}
             onPress={() => {
-              router.push("/admin" as Href);
+              router.push(
+                "/admin"
+                  as unknown as Href,
+              );
             }}
           >
-            <View style={styles.adminIcon}>
-              <Text style={styles.adminIconText}>
-                ⚙
-              </Text>
-            </View>
+            <Text style={styles.adminIcon}>
+              ⚙
+            </Text>
 
-            <View style={styles.adminText}>
+            <View style={styles.adminMain}>
               <Text style={styles.adminTitle}>
                 Админка
               </Text>
 
               <Text style={styles.adminCaption}>
-                Пользователи, роли, задания и сообщения
+                Пользователи, роли, заявки
+                и сообщения
               </Text>
             </View>
 
@@ -385,39 +488,40 @@ export default function ProfileScreen() {
           </Pressable>
         )}
 
-        <View style={styles.linkList}>
-          <Pressable
-            style={styles.linkRow}
-            onPress={() => {
-              router.push(
-                "/data-processing" as Href,
-              );
-            }}
-          >
-            <Text style={styles.linkText}>
-              Обработка данных и местоположения
-            </Text>
+        <Pressable
+          style={styles.linkRow}
+          onPress={() => {
+            router.push(
+              "/data-processing"
+                as unknown as Href,
+            );
+          }}
+        >
+          <Text style={styles.linkText}>
+            Обработка данных и местоположения
+          </Text>
 
-            <Text style={styles.linkArrow}>
-              ›
-            </Text>
-          </Pressable>
+          <Text style={styles.arrow}>
+            ›
+          </Text>
+        </Pressable>
 
-          <Pressable
-            style={styles.linkRow}
-            onPress={() => void handleLogout()}
-          >
-            <Text style={styles.logoutText}>
-              Выйти из профиля
-            </Text>
-          </Pressable>
-        </View>
+        <Pressable
+          style={styles.logout}
+          onPress={() =>
+            void leaveProfile()
+          }
+        >
+          <Text style={styles.logoutText}>
+            Выйти из профиля
+          </Text>
+        </Pressable>
       </ScrollView>
     </View>
   );
 }
 
-function Indicator({
+function Stat({
   value,
   label,
   border = false,
@@ -429,16 +533,36 @@ function Indicator({
   return (
     <View
       style={[
-        styles.indicatorColumn,
-        border && styles.indicatorBorder,
+        styles.stat,
+        border && styles.statBorder,
       ]}
     >
-      <Text style={styles.indicatorValue}>
+      <Text style={styles.statValue}>
         {value}
       </Text>
 
-      <Text style={styles.indicatorLabel}>
+      <Text style={styles.statLabel}>
         {label}
+      </Text>
+    </View>
+  );
+}
+
+function DataRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.dataRow}>
+      <Text style={styles.dataLabel}>
+        {label}
+      </Text>
+
+      <Text style={styles.dataValue}>
+        {value}
       </Text>
     </View>
   );
@@ -447,77 +571,74 @@ function Indicator({
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
   },
 
   header: {
-    minHeight: 54,
+    minHeight: 56,
     alignItems: "center",
     justifyContent: "center",
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
   },
 
   headerTitle: {
     color: colors.text,
-    fontSize: 17,
-    fontWeight: "600",
-  },
-
-  scroll: {
-    flex: 1,
+    fontSize: 18,
+    fontWeight: "800",
   },
 
   content: {
-    padding: 16,
-    paddingBottom: 35,
+    padding: 15,
+    paddingBottom: 40,
   },
 
   errorBox: {
-    marginBottom: 12,
-    padding: 11,
+    marginBottom: 11,
+    padding: 10,
     borderRadius: 9,
     backgroundColor: colors.dangerSoft,
   },
 
   errorText: {
     color: colors.danger,
-    fontSize: 13,
+    fontSize: 12,
   },
 
-  profileSummary: {
+  profile: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 13,
-    marginBottom: 16,
+    gap: 14,
+    marginBottom: 17,
   },
 
   avatar: {
-    width: 66,
-    height: 66,
+    width: 72,
+    height: 72,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 33,
+    borderRadius: 36,
     backgroundColor: colors.graphite,
   },
 
   avatarImage: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
   },
 
   avatarText: {
     color: colors.white,
-    fontSize: 20,
-    fontWeight: "700",
+    fontSize: 21,
+    fontWeight: "900",
   },
 
   camera: {
-    width: 27,
-    height: 27,
+    width: 28,
+    height: 28,
     position: "absolute",
-    right: -2,
+    right: -1,
     bottom: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -529,131 +650,44 @@ const styles = StyleSheet.create({
 
   cameraText: {
     color: colors.white,
-    fontSize: 12,
+    fontSize: 11,
   },
 
-  profileName: {
+  profileMain: {
     flex: 1,
-    gap: 6,
   },
 
   fullName: {
     color: colors.text,
     fontSize: 19,
-    fontWeight: "600",
+    fontWeight: "900",
   },
 
-  detailsLink: {
+  position: {
+    marginTop: 5,
     color: colors.primary,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-
-  hoursCard: {
-    minHeight: 88,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 15,
-    marginBottom: 15,
-    padding: 18,
-    borderRadius: 11,
-    backgroundColor: colors.graphite,
-  },
-
-  hoursIcon: {
-    color: colors.white,
-    fontSize: 32,
-  },
-
-  hoursMain: {
-    flex: 1,
-  },
-
-  hoursTitle: {
-    color: colors.white,
-    fontSize: 22,
-    fontWeight: "700",
-  },
-
-  hoursText: {
-    marginTop: 4,
-    color: "#b7c1bc",
     fontSize: 12,
-  },
-
-  card: {
-    marginBottom: 15,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-  },
-
-  cardHeading: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 13,
-  },
-
-  cardTitle: {
-    color: colors.text,
-    fontSize: 17,
     fontWeight: "700",
   },
 
-  indicators: {
-    flexDirection: "row",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-  },
-
-  indicatorsSecond: {
-    flexDirection: "row",
-    marginTop: 9,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-  },
-
-  indicatorColumn: {
-    flex: 1,
-    paddingVertical: 11,
-    paddingHorizontal: 5,
-    alignItems: "center",
-  },
-
-  indicatorBorder: {
-    borderLeftWidth: 1,
-    borderLeftColor: colors.border,
-  },
-
-  indicatorValue: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-
-  indicatorLabel: {
+  email: {
     marginTop: 3,
     color: colors.textSecondary,
-    fontSize: 10,
-    textAlign: "center",
+    fontSize: 11,
   },
 
-  adminButton: {
-    minHeight: 76,
+  closedButton: {
+    minHeight: 75,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    marginBottom: 15,
-    padding: 14,
-    borderRadius: 10,
+    marginBottom: 12,
+    padding: 13,
+    borderRadius: 13,
     backgroundColor: colors.graphite,
   },
 
-  adminIcon: {
+  closedIcon: {
     width: 43,
     height: 43,
     alignItems: "center",
@@ -662,59 +696,183 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
 
-  adminIconText: {
+  closedIconText: {
     color: colors.white,
-    fontSize: 21,
+    fontSize: 19,
+    fontWeight: "900",
   },
 
-  adminText: {
+  closedMain: {
+    flex: 1,
+  },
+
+  closedTitle: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  closedCaption: {
+    marginTop: 4,
+    color: "#bbc5c0",
+    fontSize: 10,
+  },
+
+  arrow: {
+    color: colors.textSecondary,
+    fontSize: 22,
+  },
+
+  card: {
+    marginBottom: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 13,
+    backgroundColor: colors.surface,
+  },
+
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 11,
+  },
+
+  cardTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  refresh: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  stats: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+  },
+
+  statsSecond: {
+    flexDirection: "row",
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+  },
+
+  stat: {
+    minHeight: 65,
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  statBorder: {
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+  },
+
+  statValue: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  statLabel: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 9,
+  },
+
+  dataRow: {
+    minHeight: 39,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+
+  dataLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+  },
+
+  dataValue: {
+    maxWidth: "60%",
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "right",
+  },
+
+  adminButton: {
+    minHeight: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
+    padding: 13,
+    borderRadius: 13,
+    backgroundColor: colors.graphite,
+  },
+
+  adminIcon: {
+    fontSize: 24,
+  },
+
+  adminMain: {
     flex: 1,
   },
 
   adminTitle: {
     color: colors.white,
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 14,
+    fontWeight: "800",
   },
 
   adminCaption: {
     marginTop: 3,
-    color: "#b8c2bd",
-    fontSize: 11,
+    color: "#bbc5c0",
+    fontSize: 10,
   },
 
   adminArrow: {
     color: colors.white,
-    fontSize: 23,
-  },
-
-  linkList: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    fontSize: 22,
   },
 
   linkRow: {
-    minHeight: 48,
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    paddingHorizontal: 4,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
 
   linkText: {
     flex: 1,
-    color: colors.textSecondary,
-    fontSize: 13,
+    color: colors.text,
+    fontSize: 12,
   },
 
-  linkArrow: {
-    color: colors.textSecondary,
-    fontSize: 18,
+  logout: {
+    minHeight: 52,
+    justifyContent: "center",
+    paddingHorizontal: 4,
   },
 
   logoutText: {
     color: colors.danger,
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: "700",
   },
 });

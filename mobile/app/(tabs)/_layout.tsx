@@ -191,11 +191,11 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="time"
           options={{
-            title: "Время",
+            title: "Главная",
 
             tabBarIcon: ({ color }) => (
               <TabIcon
-                symbol="◷"
+                symbol="⌂"
                 color={color}
               />
             ),
