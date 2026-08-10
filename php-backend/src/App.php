@@ -15,6 +15,12 @@ use Portal\Controllers\UserController;
 use Portal\Controllers\WorkTimeController;
 use Portal\Controllers\PortalOperationsController;
 
+require_once __DIR__
+    . '/Controllers/ServiceRequestController.php';
+
+require_once __DIR__
+    . '/Controllers/ServiceRequestContentController.php';
+
 final class App
 {
     public static function router(): Router
@@ -28,6 +34,23 @@ final class App
         ]));
 
         $router->add('POST', '/api/portal/auth/register', static fn(Request $request): HttpResponse => AuthController::register($request));
+
+        // Новая passwordless-авторизация через Volga API.
+        $router->add(
+            'POST',
+            '/api/portal/authentication',
+            static fn(Request $request): HttpResponse =>
+                AuthController::requestEmailCode($request),
+        );
+
+        $router->add(
+            'POST',
+            '/api/portal/login',
+            static fn(Request $request): HttpResponse =>
+                AuthController::emailCodeLogin($request),
+        );
+
+        // Старый login/password временно оставляем.
         $router->add('POST', '/api/portal/auth/login', static fn(Request $request): HttpResponse => AuthController::login($request));
         $router->add('POST', '/api/portal/auth/logout', static fn(): HttpResponse => AuthController::logout());
         $router->add('GET', '/api/portal/auth/me', static fn(Request $request, array $params, array $identity): HttpResponse => AuthController::me($identity), true);
@@ -650,29 +673,112 @@ final class App
             },
             true,
         );
-        $router->add('GET', '/api/portal/service-requests/wait-reasons', static fn(): HttpResponse => ServiceRequestController::waitReasons(), true);
-        $router->add('GET', '/api/portal/service-requests/{id}', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::show($params['id'], $identity), true);
+        $router->add(
+            'GET',
+            '/api/portal/service-requests/wait-reasons',
+            static function (
+                Request $request,
+                array $params,
+                array $identity,
+            ): HttpResponse {
+                try {
+                    return ServiceRequestController::waitReasons();
+                } catch (\Throwable $exception) {
+                    file_put_contents(
+                        '/opt/portal/php-backend/portal-route-error.log',
+                        '[' . date('c') . '] [WAIT_REASONS_ROUTE] '
+                        . get_class($exception)
+                        . ': '
+                        . $exception->getMessage()
+                        . ' in '
+                        . $exception->getFile()
+                        . ':'
+                        . $exception->getLine()
+                        . PHP_EOL
+                        . $exception->getTraceAsString()
+                        . PHP_EOL
+                        . PHP_EOL,
+                        FILE_APPEND | LOCK_EX,
+                    );
 
-        $router->add('POST', '/api/portal/service-requests/{id}/accept', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::accept($params['id'], $identity), true);
-        $router->add('POST', '/api/portal/service-requests/{id}/arrive', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::arrive($params['id'], $request, $identity), true);
-        $router->add('POST', '/api/portal/service-requests/{id}/start-work', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::startWork($params['id'], $identity), true);
-        $router->add('POST', '/api/portal/service-requests/{id}/wait', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::wait($params['id'], $request, $identity), true);
-        $router->add('POST', '/api/portal/service-requests/{id}/partial', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::partial($params['id'], $request, $identity), true);
-        $router->add('POST', '/api/portal/service-requests/{id}/work-items/{itemId}/complete', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::completeWorkItem($params['id'], $params['itemId'], $identity), true);
+                    return HttpResponse::json([
+                        'message' =>
+                            'Ошибка причин ожидания: '
+                            . get_class($exception)
+                            . ': '
+                            . $exception->getMessage()
+                            . ' — '
+                            . basename($exception->getFile())
+                            . ':'
+                            . $exception->getLine(),
+                    ], 500);
+                }
+            },
+            true,
+        );
+        $router->add(
+            'GET',
+            '/api/portal/service-requests/{id}',
+            static function (
+                Request $request,
+                array $params,
+                array $identity,
+            ): HttpResponse {
+                try {
+                    return ServiceRequestController::show(
+                        (int)($params['id'] ?? 0),
+                        $identity,
+                    );
+                } catch (\Throwable $exception) {
+                    file_put_contents(
+                        '/opt/portal/php-backend/portal-route-error.log',
+                        '[' . date('c') . '] [SHOW_ROUTE] '
+                        . 'raw_id='
+                        . var_export($params['id'] ?? null, true)
+                        . ' '
+                        . get_class($exception)
+                        . ': '
+                        . $exception->getMessage()
+                        . ' in '
+                        . $exception->getFile()
+                        . ':'
+                        . $exception->getLine()
+                        . PHP_EOL
+                        . $exception->getTraceAsString()
+                        . PHP_EOL
+                        . PHP_EOL,
+                        FILE_APPEND | LOCK_EX,
+                    );
+
+                    return HttpResponse::json([
+                        'message' =>
+                            'Не удалось открыть заявку',
+                    ], 500);
+                }
+            },
+            true,
+        );
+
+        $router->add('POST', '/api/portal/service-requests/{id}/accept', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::accept((int)$params['id'], $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/arrive', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::arrive((int)$params['id'], $request, $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/start-work', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::startWork((int)$params['id'], $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/wait', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::wait((int)$params['id'], $request, $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/partial', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::partial((int)$params['id'], $request, $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/work-items/{itemId}/complete', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::completeWorkItem((int)$params['id'], (int)$params['itemId'], $identity), true);
 
         $router->add('POST', '/api/portal/admin/service-requests', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestController::create($request, $identity), true);
 
 
-        $router->add('GET', '/api/portal/service-requests/{id}/comments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::comments($params['id'], $identity), true);
-        $router->add('POST', '/api/portal/service-requests/{id}/comments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::addComment($params['id'], $request, $identity), true);
+        $router->add('GET', '/api/portal/service-requests/{id}/comments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::comments((int)$params['id'], $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/comments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::addComment((int)$params['id'], $request, $identity), true);
 
-        $router->add('GET', '/api/portal/service-requests/{id}/attachments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::attachments($params['id'], $identity), true);
-        $router->add('POST', '/api/portal/service-requests/{id}/attachments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::uploadAttachment($params['id'], $identity), true);
+        $router->add('GET', '/api/portal/service-requests/{id}/attachments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::attachments((int)$params['id'], $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/attachments', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::uploadAttachment((int)$params['id'], $identity), true);
 
-        $router->add('POST', '/api/portal/service-requests/{id}/close', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::close($params['id'], $request, $identity), true);
+        $router->add('POST', '/api/portal/service-requests/{id}/close', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::close((int)$params['id'], $request, $identity), true);
 
-        $router->add('GET', '/api/portal/service-objects/{id}/history', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::objectHistory($params['id'], $request, $identity), true);
-        $router->add('GET', '/api/portal/service-objects/{id}/archive', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::objectArchive($params['id'], $request, $identity), true);
+        $router->add('GET', '/api/portal/service-objects/{id}/history', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::objectHistory((int)$params['id'], $request, $identity), true);
+        $router->add('GET', '/api/portal/service-objects/{id}/archive', static fn(Request $request, array $params, array $identity): HttpResponse => ServiceRequestContentController::objectArchive((int)$params['id'], $request, $identity), true);
 
 
         // PORTAL_SUPPORT_UNREAD_V1
