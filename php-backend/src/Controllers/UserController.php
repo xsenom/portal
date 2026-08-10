@@ -32,6 +32,140 @@ final class UserController
         return HttpResponse::json(array_map([Mapper::class, 'user'], $rows));
     }
 
+
+    public static function updateOwnAvatar(
+        Request $request,
+        array $identity,
+    ): HttpResponse {
+        $body = $request->json();
+
+        $dataUrl = Values::string(
+            $body,
+            'avatarDataUrl',
+        );
+
+        if (
+            $dataUrl === ''
+            || preg_match(
+                '#^data:image/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\r\n]+)$#i',
+                $dataUrl,
+                $matches,
+            ) !== 1
+        ) {
+            return HttpResponse::json(
+                [
+                    'message' =>
+                        'Передано некорректное изображение',
+                ],
+                400,
+            );
+        }
+
+        $base64 = preg_replace(
+            '/\s+/',
+            '',
+            $matches[2],
+        );
+
+        if (!is_string($base64)) {
+            return HttpResponse::json(
+                ['message' => 'Не удалось обработать изображение'],
+                400,
+            );
+        }
+
+        $binary = base64_decode(
+            $base64,
+            true,
+        );
+
+        if ($binary === false) {
+            return HttpResponse::json(
+                ['message' => 'Не удалось обработать изображение'],
+                400,
+            );
+        }
+
+        if (strlen($binary) > 2000000) {
+            return HttpResponse::json(
+                [
+                    'message' =>
+                        'Размер фотографии превышает 2 МБ',
+                ],
+                400,
+            );
+        }
+
+        $imageInfo = @getimagesizefromstring(
+            $binary,
+        );
+
+        if ($imageInfo === false) {
+            return HttpResponse::json(
+                ['message' => 'Файл не является изображением'],
+                400,
+            );
+        }
+
+        $mime = (string)(
+            $imageInfo['mime'] ?? ''
+        );
+
+        if (
+            !in_array(
+                $mime,
+                [
+                    'image/jpeg',
+                    'image/png',
+                    'image/webp',
+                ],
+                true,
+            )
+        ) {
+            return HttpResponse::json(
+                ['message' => 'Формат изображения не поддерживается'],
+                400,
+            );
+        }
+
+        $normalizedDataUrl =
+            'data:'
+            . $mime
+            . ';base64,'
+            . base64_encode($binary);
+
+        $statement = Database::connection()
+            ->prepare(
+                <<<'SQL'
+                UPDATE users
+                SET
+                    avatar_url = :avatar_url,
+                    updated_at = NOW()
+                WHERE id = :id
+                SQL
+            );
+
+        $statement->execute([
+            'avatar_url' =>
+                $normalizedDataUrl,
+            'id' =>
+                (int)$identity['userId'],
+        ]);
+
+        if ($statement->rowCount() === 0) {
+            return HttpResponse::json(
+                ['message' => 'Пользователь не найден'],
+                404,
+            );
+        }
+
+        return HttpResponse::json([
+            'success' => true,
+            'avatarUrl' =>
+                $normalizedDataUrl,
+        ]);
+    }
+
     public static function one(int $id): HttpResponse
     {
         $pdo = Database::connection();

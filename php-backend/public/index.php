@@ -29,6 +29,19 @@ try {
 } catch (BadRequestException $exception) {
     $response = HttpResponse::json(['message' => $exception->getMessage()], 400);
 } catch (Throwable $exception) {
+    error_log(
+        '[PORTAL_GLOBAL_EXCEPTION] '
+        . get_class($exception)
+        . ': '
+        . $exception->getMessage()
+        . ' in '
+        . $exception->getFile()
+        . ':'
+        . $exception->getLine()
+        . PHP_EOL
+        . $exception->getTraceAsString()
+    );
+
     error_log(sprintf(
         "Portal PHP API error: %s in %s:%d\n%s",
         $exception->getMessage(),
